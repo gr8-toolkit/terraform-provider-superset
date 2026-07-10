@@ -1029,6 +1029,7 @@ func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
 }
 
 // DeleteDataset deletes a dataset by ID.
+// Returns nil if the dataset is already deleted (404).
 func (c *Client) DeleteDataset(id int64) error {
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
@@ -1047,9 +1048,151 @@ func (c *Client) DeleteDataset(id int64) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // already deleted
+	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("failed to delete dataset, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// GetDatasetIDByUUID finds a dataset ID by its UUID using the Superset API.
+// Returns 0 and nil if not found.
+func (c *Client) GetDatasetIDByUUID(uuid string) (int64, error) {
+	endpoint := fmt.Sprintf("/api/v1/dataset/?q=(filters:!((col:uuid,opr:eq,value:'%s')))", uuid)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("failed to fetch dataset by uuid %q, status code: %d, response: %s", uuid, resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Result []struct {
+			ID float64 `json:"id"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, err
+	}
+	if len(result.Result) == 0 {
+		return 0, nil
+	}
+	return int64(result.Result[0].ID), nil
+}
+
+// GetChartIDByUUID finds a chart ID by its UUID using the Superset API.
+// Returns 0 and nil if not found.
+func (c *Client) GetChartIDByUUID(uuid string) (int64, error) {
+	endpoint := fmt.Sprintf("/api/v1/chart/?q=(filters:!((col:uuid,opr:eq,value:'%s')))", uuid)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("failed to fetch chart by uuid %q, status code: %d, response: %s", uuid, resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Result []struct {
+			ID float64 `json:"id"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, err
+	}
+	if len(result.Result) == 0 {
+		return 0, nil
+	}
+	return int64(result.Result[0].ID), nil
+}
+
+// GetChartDashboardCount returns the number of dashboards referencing a chart.
+func (c *Client) GetChartDashboardCount(chartID int64) (int, error) {
+	endpoint := fmt.Sprintf("/api/v1/chart/%d", chartID)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("failed to get chart %d, status code: %d, response: %s", chartID, resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Result struct {
+			Dashboards []struct {
+				ID int64 `json:"id"`
+			} `json:"dashboards"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, err
+	}
+	return len(result.Result.Dashboards), nil
+}
+
+// GetDatasetChartCount returns the number of charts referencing a dataset.
+func (c *Client) GetDatasetChartCount(datasetID int64) (int, error) {
+	endpoint := fmt.Sprintf("/api/v1/chart/?q=(filters:!((col:datasource_id,opr:eq,value:%d)))", datasetID)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("failed to get charts for dataset %d, status code: %d, response: %s", datasetID, resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Count int `json:"count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, err
+	}
+	return result.Count, nil
+}
+
+// DeleteChart deletes a chart by ID.
+// Returns nil if the chart is already deleted (404).
+func (c *Client) DeleteChart(id int64) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	endpoint := fmt.Sprintf("/api/v1/chart/%d", id)
+	resp, err := c.DoRequestWithHeadersAndCookies("DELETE", endpoint, nil, headers, cookies)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // already deleted
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete chart, status code: %d, response: %s", resp.StatusCode, string(body))
 	}
 
 	return nil
@@ -1094,6 +1237,23 @@ func (c *Client) GetDatabaseNameByID(databaseID int64) (string, error) {
 // ImportDashboard imports a dashboard from a ZIP file.
 // passwords is a JSON string mapping "databases/file.yaml" to password.
 func (c *Client) ImportDashboard(zipData []byte, overwrite bool, passwords string) error {
+	return c.importViaEndpoint("/api/v1/dashboard/import/", zipData, overwrite, passwords)
+}
+
+// ImportDataset imports datasets from a ZIP file via the dataset import endpoint.
+// This endpoint properly respects overwrite=true for datasets.
+func (c *Client) ImportDataset(zipData []byte, overwrite bool, passwords string) error {
+	return c.importViaEndpoint("/api/v1/dataset/import/", zipData, overwrite, passwords)
+}
+
+// ImportChart imports charts from a ZIP file via the chart import endpoint.
+// This endpoint properly respects overwrite=true for charts.
+func (c *Client) ImportChart(zipData []byte, overwrite bool, passwords string) error {
+	return c.importViaEndpoint("/api/v1/chart/import/", zipData, overwrite, passwords)
+}
+
+// importViaEndpoint is a shared helper that posts a ZIP to any Superset import endpoint.
+func (c *Client) importViaEndpoint(endpoint string, zipData []byte, overwrite bool, passwords string) error {
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
 		return err
@@ -1102,7 +1262,7 @@ func (c *Client) ImportDashboard(zipData []byte, overwrite bool, passwords strin
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
-	part, err := writer.CreateFormFile("formData", "dashboard_export.zip")
+	part, err := writer.CreateFormFile("formData", "export.zip")
 	if err != nil {
 		return err
 	}
@@ -1118,7 +1278,7 @@ func (c *Client) ImportDashboard(zipData []byte, overwrite bool, passwords strin
 	}
 	writer.Close()
 
-	url := fmt.Sprintf("%s/api/v1/dashboard/import/", c.Host)
+	url := fmt.Sprintf("%s%s", c.Host, endpoint)
 	req, err := http.NewRequest("POST", url, &body)
 	if err != nil {
 		return err
@@ -1143,7 +1303,7 @@ func (c *Client) ImportDashboard(zipData []byte, overwrite bool, passwords strin
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to import dashboard, status code: %d, response: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("import failed at %s, status code: %d, response: %s", endpoint, resp.StatusCode, string(respBody))
 	}
 
 	return nil

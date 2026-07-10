@@ -228,5 +228,7 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewRowLevelSecurityResource,   // Row level security resource
 		NewDashboardImportResource,    // Dashboard import resource
 		NewDashboardEmbeddingResource, // Dashboard embedding resource
+		NewDatasetImportResource,      // Dataset import resource
+		NewChartImportResource,        // Chart import resource
 	}
 }
