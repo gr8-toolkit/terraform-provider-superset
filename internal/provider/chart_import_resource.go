@@ -40,6 +40,7 @@ type chartImportResourceModel struct {
 	DatabaseSecrets   types.Map    `tfsdk:"database_secrets"`
 	DatabaseOverrides types.Map    `tfsdk:"database_overrides"`
 	FileHashes        types.Map    `tfsdk:"file_hashes"`
+	SkipFiles         types.List   `tfsdk:"skip_files"`
 }
 
 // Prefixes included in the chart import ZIP.
@@ -93,6 +94,12 @@ func (r *chartImportResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Computed:    true,
 				ElementType: types.StringType,
 			},
+			"skip_files": schema.ListAttribute{
+				Description: "List of regex patterns to exclude files from hashing and import. " +
+					"Matched against both the file name and relative path.",
+				Optional:    true,
+				ElementType: types.StringType,
+			},
 		},
 	}
 }
@@ -127,7 +134,8 @@ func (r *chartImportResource) ModifyPlan(ctx context.Context, req resource.Modif
 	}
 
 	overrides := parseDatabaseOverrides(ctx, plan.DatabaseOverrides)
-	newHashes, err := computeFilteredFileHashes(sourceDir, chartImportPrefixes, overrides)
+	skipPatterns := compileSkipPatterns(parseSkipFiles(ctx, plan.SkipFiles))
+	newHashes, err := computeFilteredFileHashes(sourceDir, chartImportPrefixes, overrides, skipPatterns)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Cannot compute file hashes", err.Error())
 		return
@@ -267,7 +275,7 @@ func (r *chartImportResource) Delete(ctx context.Context, req resource.DeleteReq
 func (r *chartImportResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	sourceDir := req.ID
 
-	hashes, err := computeFilteredFileHashes(sourceDir, chartImportPrefixes, nil)
+	hashes, err := computeFilteredFileHashes(sourceDir, chartImportPrefixes, nil, nil)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to compute file hashes", err.Error())
 		return
@@ -284,8 +292,9 @@ func (r *chartImportResource) doImport(ctx context.Context, plan *chartImportRes
 	plan.ID = types.StringValue(fmt.Sprintf("chart-import:%s", sourceDir))
 
 	overrides := parseDatabaseOverrides(ctx, plan.DatabaseOverrides)
+	skipPatterns := compileSkipPatterns(parseSkipFiles(ctx, plan.SkipFiles))
 
-	hashes, err := computeFilteredFileHashes(sourceDir, chartImportPrefixes, overrides)
+	hashes, err := computeFilteredFileHashes(sourceDir, chartImportPrefixes, overrides, skipPatterns)
 	if err != nil {
 		return fmt.Errorf("computing file hashes: %w", err)
 	}
@@ -308,7 +317,7 @@ func (r *chartImportResource) doImport(ctx context.Context, plan *chartImportRes
 		passwords = string(b)
 	}
 
-	zipData, err := zipDirectoryFiltered(sourceDir, overrides, chartImportPrefixes, "Slice")
+	zipData, err := zipDirectoryFiltered(sourceDir, overrides, chartImportPrefixes, "Slice", skipPatterns)
 	if err != nil {
 		return fmt.Errorf("creating ZIP: %w", err)
 	}

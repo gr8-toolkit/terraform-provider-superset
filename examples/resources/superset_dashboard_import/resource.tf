@@ -20,4 +20,7 @@ resource "superset_dashboard_import" "example" {
 
   # Role IDs to assign to the dashboard. Applied after every create/update.
   roles = [superset_role.analytics.id, superset_role.viewers.id]
+
+  # Exclude files from hashing to avoid spurious diffs
+  skip_files = [".*terragrunt.*", "\\.terraform\\.lock\\.hcl"]
 }

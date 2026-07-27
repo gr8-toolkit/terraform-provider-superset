@@ -35,6 +35,9 @@ resource "superset_dashboard_import" "example" {
 
   # Role IDs to assign to the dashboard. Applied after every create/update.
   roles = [superset_role.analytics.id, superset_role.viewers.id]
+
+  # Exclude files from hashing to avoid spurious diffs
+  skip_files = [".*terragrunt.*", "\\.terraform\\.lock\\.hcl"]
 }
 ```
 
@@ -51,6 +54,7 @@ resource "superset_dashboard_import" "example" {
 - `database_secrets` (Map of String, Sensitive) Map of database UUID to database password/secret. Used to provide credentials for databases referenced in the export.
 - `force_overwrite` (Boolean) Whether to overwrite existing dashboards on import. Defaults to true.
 - `roles` (List of Number) List of role IDs to assign to the dashboard. Applied after every import.
+- `skip_files` (List of String) List of regex patterns to exclude files from hashing and import. Matched against both the file name and relative path.
 
 ### Read-Only
 

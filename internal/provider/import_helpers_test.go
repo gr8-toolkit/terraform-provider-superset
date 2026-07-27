@@ -44,7 +44,7 @@ func setupTestExportDir(t *testing.T) string {
 func TestComputeFilteredFileHashes_Datasets(t *testing.T) {
 	root := setupTestExportDir(t)
 
-	hashes, err := computeFilteredFileHashes(root, []string{"datasets/", "databases/"}, nil)
+	hashes, err := computeFilteredFileHashes(root, []string{"datasets/", "databases/"}, nil, nil)
 	require.NoError(t, err)
 
 	// Should include datasets and databases, not charts or dashboards
@@ -59,7 +59,7 @@ func TestComputeFilteredFileHashes_Datasets(t *testing.T) {
 func TestComputeFilteredFileHashes_Charts(t *testing.T) {
 	root := setupTestExportDir(t)
 
-	hashes, err := computeFilteredFileHashes(root, []string{"charts/", "datasets/", "databases/"}, nil)
+	hashes, err := computeFilteredFileHashes(root, []string{"charts/", "datasets/", "databases/"}, nil, nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, hashes, "charts/chart_a.yaml")
@@ -78,18 +78,18 @@ func TestComputeFilteredFileHashes_DatabaseOverrides(t *testing.T) {
 		"db-uuid-1": {"sqlalchemy_uri": "starrocks://new-host:9030"},
 	}
 
-	hashes, err := computeFilteredFileHashes(root, []string{"databases/"}, overrides)
+	hashes, err := computeFilteredFileHashes(root, []string{"databases/"}, overrides, nil)
 	require.NoError(t, err)
 
 	// Hash should differ from the non-overridden version
-	hashesNoOverride, _ := computeFilteredFileHashes(root, []string{"databases/"}, nil)
+	hashesNoOverride, _ := computeFilteredFileHashes(root, []string{"databases/"}, nil, nil)
 	assert.NotEqual(t, hashes["databases/db_alpha.yaml"], hashesNoOverride["databases/db_alpha.yaml"])
 }
 
 func TestZipDirectoryFiltered_Datasets(t *testing.T) {
 	root := setupTestExportDir(t)
 
-	zipData, err := zipDirectoryFiltered(root, nil, []string{"datasets/", "databases/"}, "SqlaTable")
+	zipData, err := zipDirectoryFiltered(root, nil, []string{"datasets/", "databases/"}, "SqlaTable", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, zipData)
 
@@ -117,7 +117,7 @@ func TestZipDirectoryFiltered_Datasets(t *testing.T) {
 func TestZipDirectoryFiltered_Charts(t *testing.T) {
 	root := setupTestExportDir(t)
 
-	zipData, err := zipDirectoryFiltered(root, nil, []string{"charts/", "datasets/", "databases/"}, "Slice")
+	zipData, err := zipDirectoryFiltered(root, nil, []string{"charts/", "datasets/", "databases/"}, "Slice", nil)
 	require.NoError(t, err)
 
 	reader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
@@ -142,7 +142,7 @@ func TestZipDirectoryFiltered_Charts(t *testing.T) {
 func TestZipDirectoryFiltered_MetadataType(t *testing.T) {
 	root := setupTestExportDir(t)
 
-	zipData, err := zipDirectoryFiltered(root, nil, []string{"datasets/", "databases/"}, "SqlaTable")
+	zipData, err := zipDirectoryFiltered(root, nil, []string{"datasets/", "databases/"}, "SqlaTable", nil)
 	require.NoError(t, err)
 
 	reader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
@@ -171,7 +171,7 @@ func TestZipDirectoryFiltered_DatabaseOverrides(t *testing.T) {
 		"db-uuid-1": {"sqlalchemy_uri": "starrocks://overridden:9030"},
 	}
 
-	zipData, err := zipDirectoryFiltered(root, overrides, []string{"databases/"}, "SqlaTable")
+	zipData, err := zipDirectoryFiltered(root, overrides, []string{"databases/"}, "SqlaTable", nil)
 	require.NoError(t, err)
 
 	reader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
@@ -189,4 +189,100 @@ func TestZipDirectoryFiltered_DatabaseOverrides(t *testing.T) {
 		}
 	}
 	t.Fatal("database file not found in ZIP")
+}
+
+func setupTestExportDirWithExtraFiles(t *testing.T) string {
+	t.Helper()
+	root := setupTestExportDir(t)
+
+	// Add terragrunt manifest files that should be skippable
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".terragrunt-source-manifest"),
+		[]byte("hash: abc123\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".terragrunt-module-manifest"),
+		[]byte("module: something\n"), 0644))
+	// Add a .terraform.lock.hcl in a subdirectory
+	require.NoError(t, os.WriteFile(filepath.Join(root, "databases", ".terraform.lock.hcl"),
+		[]byte("provider stuff\n"), 0644))
+
+	return root
+}
+
+func TestComputeFilteredFileHashes_SkipFiles(t *testing.T) {
+	root := setupTestExportDirWithExtraFiles(t)
+
+	// Without skip patterns — extra files in databases/ prefix are included
+	hashesAll, err := computeFilteredFileHashes(root, []string{"datasets/", "databases/"}, nil, nil)
+	require.NoError(t, err)
+	assert.Contains(t, hashesAll, "databases/.terraform.lock.hcl")
+
+	// With skip patterns — terraform lock file excluded
+	skip := compileSkipPatterns([]string{`\.terraform\.lock\.hcl`})
+	hashesSkipped, err := computeFilteredFileHashes(root, []string{"datasets/", "databases/"}, nil, skip)
+	require.NoError(t, err)
+	assert.NotContains(t, hashesSkipped, "databases/.terraform.lock.hcl")
+	assert.Contains(t, hashesSkipped, "databases/db_alpha.yaml")
+}
+
+func TestComputeFilteredFileHashes_SkipFilesByRegex(t *testing.T) {
+	root := setupTestExportDirWithExtraFiles(t)
+
+	// Skip anything with "terragrunt" in the name
+	skip := compileSkipPatterns([]string{`.*terragrunt.*`})
+	hashes, err := computeFilteredFileHashes(root, []string{"datasets/", "databases/"}, nil, skip)
+	require.NoError(t, err)
+
+	// Terragrunt files are at root level, outside prefixes, so they wouldn't be included anyway.
+	// But the pattern matching logic itself works — let's verify with a broader prefix.
+	hashesAll, err := computeFilteredFileHashes(root, []string{"datasets/", "databases/", ""}, nil, nil)
+	require.NoError(t, err)
+	assert.Contains(t, hashesAll, ".terragrunt-source-manifest")
+
+	hashesSkipped, err := computeFilteredFileHashes(root, []string{"datasets/", "databases/", ""}, nil, skip)
+	require.NoError(t, err)
+	assert.NotContains(t, hashesSkipped, ".terragrunt-source-manifest")
+	assert.NotContains(t, hashesSkipped, ".terragrunt-module-manifest")
+
+	// Non-matching files still present
+	assert.Contains(t, hashesSkipped, "databases/db_alpha.yaml")
+	_ = hashes
+}
+
+func TestZipDirectoryFiltered_SkipFiles(t *testing.T) {
+	root := setupTestExportDirWithExtraFiles(t)
+
+	skip := compileSkipPatterns([]string{`\.terraform\.lock\.hcl`})
+	zipData, err := zipDirectoryFiltered(root, nil, []string{"datasets/", "databases/"}, "SqlaTable", skip)
+	require.NoError(t, err)
+
+	reader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	require.NoError(t, err)
+
+	var relPaths []string
+	for _, f := range reader.File {
+		parts := strings.SplitN(f.Name, "/", 2)
+		if len(parts) == 2 && parts[1] != "" {
+			relPaths = append(relPaths, parts[1])
+		}
+	}
+
+	assert.NotContains(t, relPaths, "databases/.terraform.lock.hcl")
+	assert.Contains(t, relPaths, "databases/db_alpha.yaml")
+	assert.Contains(t, relPaths, "datasets/db_alpha/dataset_a.yaml")
+}
+
+func TestShouldSkipFile(t *testing.T) {
+	patterns := compileSkipPatterns([]string{`.*terragrunt.*`, `^init$`})
+
+	assert.True(t, shouldSkipFile(".terragrunt-source-manifest", ".terragrunt-source-manifest", patterns))
+	assert.True(t, shouldSkipFile(".terragrunt-module-manifest", "sub/.terragrunt-module-manifest", patterns))
+	assert.True(t, shouldSkipFile("init", "charts/init", patterns))
+	assert.False(t, shouldSkipFile("chart_a.yaml", "charts/chart_a.yaml", patterns))
+	assert.False(t, shouldSkipFile("initialize.yaml", "charts/initialize.yaml", patterns))
+}
+
+func TestCompileSkipPatterns_InvalidRegex(t *testing.T) {
+	// Invalid regex should be silently skipped
+	patterns := compileSkipPatterns([]string{`[invalid`, `.*valid.*`})
+	assert.Equal(t, 1, len(patterns))
+	assert.True(t, shouldSkipFile("valid_file", "valid_file", patterns))
 }

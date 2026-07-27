@@ -26,6 +26,9 @@ resource "superset_dataset_import" "example" {
       sqlalchemy_uri = "postgresql://user:pass@host:5432/mydb"
     })
   }
+
+  # Exclude files from hashing to avoid spurious diffs
+  skip_files = [".*terragrunt.*", "\\.terraform\\.lock\\.hcl"]
 }
 ```
 
@@ -41,6 +44,7 @@ resource "superset_dataset_import" "example" {
 - `database_overrides` (Map of String) Map of database UUID to a JSON-encoded object of YAML field overrides.
 - `database_secrets` (Map of String, Sensitive) Map of database UUID to database password/secret.
 - `force_overwrite` (Boolean) Whether to overwrite existing datasets on import. Defaults to true.
+- `skip_files` (List of String) List of regex patterns to exclude files from hashing and import. Matched against both the file name and relative path.
 
 ### Read-Only
 

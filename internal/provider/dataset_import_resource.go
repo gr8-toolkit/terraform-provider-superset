@@ -40,6 +40,7 @@ type datasetImportResourceModel struct {
 	DatabaseSecrets   types.Map    `tfsdk:"database_secrets"`
 	DatabaseOverrides types.Map    `tfsdk:"database_overrides"`
 	FileHashes        types.Map    `tfsdk:"file_hashes"`
+	SkipFiles         types.List   `tfsdk:"skip_files"`
 }
 
 // Prefixes included in the dataset import ZIP.
@@ -93,6 +94,12 @@ func (r *datasetImportResource) Schema(_ context.Context, _ resource.SchemaReque
 				Computed:    true,
 				ElementType: types.StringType,
 			},
+			"skip_files": schema.ListAttribute{
+				Description: "List of regex patterns to exclude files from hashing and import. " +
+					"Matched against both the file name and relative path.",
+				Optional:    true,
+				ElementType: types.StringType,
+			},
 		},
 	}
 }
@@ -127,7 +134,8 @@ func (r *datasetImportResource) ModifyPlan(ctx context.Context, req resource.Mod
 	}
 
 	overrides := parseDatabaseOverrides(ctx, plan.DatabaseOverrides)
-	newHashes, err := computeFilteredFileHashes(sourceDir, datasetImportPrefixes, overrides)
+	skipPatterns := compileSkipPatterns(parseSkipFiles(ctx, plan.SkipFiles))
+	newHashes, err := computeFilteredFileHashes(sourceDir, datasetImportPrefixes, overrides, skipPatterns)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Cannot compute file hashes", err.Error())
 		return
@@ -242,7 +250,7 @@ func (r *datasetImportResource) Delete(ctx context.Context, req resource.DeleteR
 func (r *datasetImportResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	sourceDir := req.ID
 
-	hashes, err := computeFilteredFileHashes(sourceDir, datasetImportPrefixes, nil)
+	hashes, err := computeFilteredFileHashes(sourceDir, datasetImportPrefixes, nil, nil)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to compute file hashes", err.Error())
 		return
@@ -259,8 +267,9 @@ func (r *datasetImportResource) doImport(ctx context.Context, plan *datasetImpor
 	plan.ID = types.StringValue(fmt.Sprintf("dataset-import:%s", sourceDir))
 
 	overrides := parseDatabaseOverrides(ctx, plan.DatabaseOverrides)
+	skipPatterns := compileSkipPatterns(parseSkipFiles(ctx, plan.SkipFiles))
 
-	hashes, err := computeFilteredFileHashes(sourceDir, datasetImportPrefixes, overrides)
+	hashes, err := computeFilteredFileHashes(sourceDir, datasetImportPrefixes, overrides, skipPatterns)
 	if err != nil {
 		return fmt.Errorf("computing file hashes: %w", err)
 	}
@@ -283,7 +292,7 @@ func (r *datasetImportResource) doImport(ctx context.Context, plan *datasetImpor
 		passwords = string(b)
 	}
 
-	zipData, err := zipDirectoryFiltered(sourceDir, overrides, datasetImportPrefixes, "SqlaTable")
+	zipData, err := zipDirectoryFiltered(sourceDir, overrides, datasetImportPrefixes, "SqlaTable", skipPatterns)
 	if err != nil {
 		return fmt.Errorf("creating ZIP: %w", err)
 	}

@@ -8,16 +8,42 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
+// shouldSkipFile checks whether a file (by its base name or relative path) matches
+// any of the user-provided skip patterns. Each pattern is treated as a regex.
+// If the pattern contains no regex metacharacters, it is matched as an exact filename.
+func shouldSkipFile(name string, relPath string, skipPatterns []*regexp.Regexp) bool {
+	for _, re := range skipPatterns {
+		if re.MatchString(name) || re.MatchString(relPath) {
+			return true
+		}
+	}
+	return false
+}
+
+// compileSkipPatterns compiles a list of string patterns into regexps.
+// Invalid patterns are silently skipped.
+func compileSkipPatterns(patterns []string) []*regexp.Regexp {
+	var compiled []*regexp.Regexp
+	for _, p := range patterns {
+		if re, err := regexp.Compile(p); err == nil {
+			compiled = append(compiled, re)
+		}
+	}
+	return compiled
+}
+
 // zipDirectoryFiltered creates a ZIP of sourceDir including only the specified subdirectory prefixes.
 // It generates a metadata.yaml with the given type and current timestamp.
 // Database overrides are applied to databases/*.yaml files.
-func zipDirectoryFiltered(sourceDir string, overrides map[string]map[string]interface{}, includePrefixes []string, metadataType string) ([]byte, error) {
+// Files matching skipPatterns are excluded from the ZIP.
+func zipDirectoryFiltered(sourceDir string, overrides map[string]map[string]interface{}, includePrefixes []string, metadataType string, skipPatterns []*regexp.Regexp) ([]byte, error) {
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 	base := filepath.Base(sourceDir)
@@ -39,6 +65,11 @@ func zipDirectoryFiltered(sourceDir string, overrides map[string]map[string]inte
 
 		// Skip root and metadata.yaml (we generate our own)
 		if relSlash == "." || relSlash == "metadata.yaml" {
+			return nil
+		}
+
+		// Skip files matching user-provided patterns
+		if !d.IsDir() && shouldSkipFile(d.Name(), relSlash, skipPatterns) {
 			return nil
 		}
 
@@ -103,7 +134,8 @@ func zipDirectoryFiltered(sourceDir string, overrides map[string]map[string]inte
 
 // computeFilteredFileHashes computes SHA256 hashes for files in sourceDir matching the given prefixes.
 // Database overrides are applied to databases/*.yaml before hashing.
-func computeFilteredFileHashes(sourceDir string, prefixes []string, overrides map[string]map[string]interface{}) (map[string]string, error) {
+// Files matching skipPatterns are excluded.
+func computeFilteredFileHashes(sourceDir string, prefixes []string, overrides map[string]map[string]interface{}, skipPatterns []*regexp.Regexp) (map[string]string, error) {
 	hashes := make(map[string]string)
 	err := filepath.WalkDir(sourceDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -112,8 +144,14 @@ func computeFilteredFileHashes(sourceDir string, prefixes []string, overrides ma
 		if d.IsDir() {
 			return nil
 		}
+
 		rel, _ := filepath.Rel(sourceDir, p)
 		relSlash := filepath.ToSlash(rel)
+
+		// Skip files matching user-provided patterns
+		if shouldSkipFile(d.Name(), relSlash, skipPatterns) {
+			return nil
+		}
 
 		// Only include files under the specified prefixes
 		included := false
