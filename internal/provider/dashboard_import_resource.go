@@ -54,6 +54,7 @@ type dashboardImportResourceModel struct {
 	DashboardID       types.Int64  `tfsdk:"dashboard_id"`
 	Roles             types.List   `tfsdk:"roles"`
 	SkipFiles         types.List   `tfsdk:"skip_files"`
+	CSSOverride       types.String `tfsdk:"css_override"`
 }
 
 func (r *dashboardImportResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -123,6 +124,11 @@ func (r *dashboardImportResource) Schema(_ context.Context, _ resource.SchemaReq
 				Optional:    true,
 				ElementType: types.StringType,
 			},
+			"css_override": schema.StringAttribute{
+				Description: "CSS content to override the inline css field in the dashboard YAML before import. " +
+					"When set, replaces the css field in the dashboard export file.",
+				Optional: true,
+			},
 		},
 	}
 }
@@ -163,7 +169,12 @@ func (r *dashboardImportResource) ModifyPlan(ctx context.Context, req resource.M
 		tflog.Debug(ctx, fmt.Sprintf("skip_files patterns configured: %v", skipFilePatterns))
 	}
 
-	newHashes, err := computeFileHashesWithOverrides(sourceDir, overrides, skipPatterns)
+	cssOverride := ""
+	if !plan.CSSOverride.IsNull() && !plan.CSSOverride.IsUnknown() {
+		cssOverride = plan.CSSOverride.ValueString()
+	}
+
+	newHashes, err := computeFileHashesWithOverrides(sourceDir, overrides, skipPatterns, cssOverride)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Cannot compute file hashes", err.Error())
 		return
@@ -292,13 +303,18 @@ func (r *dashboardImportResource) importDashboard(ctx context.Context, plan *das
 		tflog.Info(ctx, fmt.Sprintf("Skipping files matching patterns: %v", skipFilePatterns))
 	}
 
-	fileHashes, err := computeFileHashesWithOverrides(sourceDir, overrides, skipPatterns)
+	cssOverride := ""
+	if !plan.CSSOverride.IsNull() && !plan.CSSOverride.IsUnknown() {
+		cssOverride = plan.CSSOverride.ValueString()
+	}
+
+	fileHashes, err := computeFileHashesWithOverrides(sourceDir, overrides, skipPatterns, cssOverride)
 	if err != nil {
 		return fmt.Errorf("computing file hashes: %w", err)
 	}
 	plan.FileHashes = toStringMap(fileHashes)
 
-	zipData, err := zipDirectoryWithOverrides(sourceDir, overrides, skipPatterns)
+	zipData, err := zipDirectoryWithOverrides(sourceDir, overrides, skipPatterns, cssOverride)
 	if err != nil {
 		return fmt.Errorf("creating ZIP: %w", err)
 	}
@@ -568,8 +584,9 @@ func applyDatabaseOverrides(data []byte, overrides map[string]map[string]interfa
 
 // computeFileHashesWithOverrides computes SHA256 hashes for all files in dir,
 // applying database overrides to databases/*.yaml files before hashing.
+// If cssOverride is non-empty, it replaces the css field in dashboards/*.yaml files.
 // Files matching skipPatterns are excluded.
-func computeFileHashesWithOverrides(dir string, overrides map[string]map[string]interface{}, skipPatterns []*regexp.Regexp) (map[string]string, error) {
+func computeFileHashesWithOverrides(dir string, overrides map[string]map[string]interface{}, skipPatterns []*regexp.Regexp, cssOverride string) (map[string]string, error) {
 	hashes := make(map[string]string)
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -591,6 +608,9 @@ func computeFileHashesWithOverrides(dir string, overrides map[string]map[string]
 		if strings.HasPrefix(rel, "databases/") && strings.HasSuffix(rel, ".yaml") {
 			data, _ = applyDatabaseOverrides(data, overrides)
 		}
+		if strings.HasPrefix(rel, "dashboards/") && strings.HasSuffix(rel, ".yaml") && cssOverride != "" {
+			data, _ = applyCSSOverride(data, cssOverride)
+		}
 		h := sha256.Sum256(data)
 		hashes[rel] = fmt.Sprintf("%x", h)
 		return nil
@@ -599,8 +619,9 @@ func computeFileHashesWithOverrides(dir string, overrides map[string]map[string]
 }
 
 // zipDirectoryWithOverrides creates a ZIP of sourceDir, applying database overrides to databases/*.yaml.
+// If cssOverride is non-empty, it replaces the css field in dashboards/*.yaml files.
 // Files matching skipPatterns are excluded.
-func zipDirectoryWithOverrides(sourceDir string, overrides map[string]map[string]interface{}, skipPatterns []*regexp.Regexp) ([]byte, error) {
+func zipDirectoryWithOverrides(sourceDir string, overrides map[string]map[string]interface{}, skipPatterns []*regexp.Regexp, cssOverride string) ([]byte, error) {
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 	base := filepath.Base(sourceDir)
@@ -629,6 +650,9 @@ func zipDirectoryWithOverrides(sourceDir string, overrides map[string]map[string
 		if strings.HasPrefix(relSlash, "databases/") && strings.HasSuffix(relSlash, ".yaml") {
 			data, _ = applyDatabaseOverrides(data, overrides)
 		}
+		if strings.HasPrefix(relSlash, "dashboards/") && strings.HasSuffix(relSlash, ".yaml") && cssOverride != "" {
+			data, _ = applyCSSOverride(data, cssOverride)
+		}
 		f, err := w.Create(zipPath)
 		if err != nil {
 			return err
@@ -643,4 +667,20 @@ func zipDirectoryWithOverrides(sourceDir string, overrides map[string]map[string
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// applyCSSOverride replaces the css field in a dashboard YAML file with the override value.
+func applyCSSOverride(data []byte, cssOverride string) ([]byte, error) {
+	var doc map[string]interface{}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return data, err
+	}
+
+	doc["css"] = cssOverride
+
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return data, err
+	}
+	return out, nil
 }

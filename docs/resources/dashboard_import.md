@@ -50,6 +50,7 @@ resource "superset_dashboard_import" "example" {
 
 ### Optional
 
+- `css_override` (String) CSS content to override the inline css field in the dashboard YAML before import. When set, replaces the css field in the dashboard export file.
 - `database_overrides` (Map of String) Map of database UUID to a JSON-encoded object of YAML field overrides. Allows overriding any fields (including nested) in database export files before import. Example: {"<uuid>" = jsonencode({sqlalchemy_uri = "...", extra = {cost_estimate_enabled = false}})}
 - `database_secrets` (Map of String, Sensitive) Map of database UUID to database password/secret. Used to provide credentials for databases referenced in the export.
 - `force_overwrite` (Boolean) Whether to overwrite existing dashboards on import. Defaults to true.
