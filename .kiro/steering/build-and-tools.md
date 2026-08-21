@@ -94,7 +94,6 @@ Hooks configured in `.pre-commit-config.yaml`:
 | `prettier` | Formats `.yml`/`.yaml`/`.avsc` files |
 | `markdownlint` | Lints and auto-fixes Markdown (excludes `docs/`) |
 | `golangci-lint-full` | Full lint pass |
-| `golangci-lint-config-verify` | Validates `.golangci.yml` |
 
 ## License Headers
 
