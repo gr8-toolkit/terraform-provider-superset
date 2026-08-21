@@ -30,3 +30,6 @@ repos:
     hooks:
       - id: golangci-lint-full
       - id: golangci-lint-config-verify
+
+default_language_version:
+  golang: "1.25.0"
