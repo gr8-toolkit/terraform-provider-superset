@@ -32,4 +32,4 @@ repos:
       - id: golangci-lint-config-verify
 
 default_language_version:
-  golang: "1.25.0"
+  golang: "1.25.8"
