@@ -1,56 +1,109 @@
-# Terraform Provider Apache Superset
+# Terraform Provider for Apache Superset
 
-- A resource and a data source (`internal/provider/`),
-- Examples (`examples/`) and generated documentation (`docs/`),
-- Miscellaneous meta files.
+A Terraform provider for managing [Apache Superset](https://superset.apache.org/)
+resources — databases, datasets, dashboards, charts, roles, users, and more.
 
 ## Requirements
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
-- [Go](https://golang.org/doc/install) >= 1.21
+| Tool | Version |
+|------|---------|
+| [Terraform](https://developer.hashicorp.com/terraform/downloads) | >= 1.0 |
+| [Go](https://golang.org/doc/install) | >= 1.24 |
 
-## Building The Provider
+## Using the Provider
 
-1. Clone the repository
-1. Enter the repository directory
-1. Build the provider using the Go `install` command:
+```hcl
+terraform {
+  required_providers {
+    superset = {
+      source  = "gr8-toolkit/superset"
+    }
+  }
+}
+
+provider "superset" {
+  url      = "https://your-superset-instance.example.com"
+  username = "admin"
+  password = "your-password"
+}
+```
+
+## Resources
+
+| Resource | Description |
+|----------|-------------|
+| `superset_database` | Manage database connections |
+| `superset_dataset` | Manage datasets |
+| `superset_dataset_import` | Import datasets from a ZIP file |
+| `superset_chart_import` | Import charts from a ZIP file |
+| `superset_dashboard_import` | Import dashboards from a ZIP file |
+| `superset_dashboard_embedding` | Configure dashboard embedding settings |
+| `superset_meta_database` | Manage meta (virtual) databases |
+| `superset_role` | Manage roles |
+| `superset_role_permissions` | Manage role permission assignments |
+| `superset_row_level_security` | Manage row-level security filters |
+| `superset_user` | Manage users |
+| `superset_css_template` | Manage CSS templates |
+
+## Data Sources
+
+| Data Source | Description |
+|-------------|-------------|
+| `superset_databases` | List all database connections |
+| `superset_datasets` | List all datasets |
+| `superset_role` | Look up a role by name |
+| `superset_roles` | List all roles |
+| `superset_role_permissions` | List permissions for a role |
+| `superset_users` | List all users |
+| `superset_css_template` | Look up a CSS template |
+
+## Building the Provider
+
+Clone the repository and build the binary to `dist/`:
+
+```shell
+git clone https://github.com/gr8-toolkit/terraform-provider-superset.git
+cd terraform-provider-superset
+make build
+```
+
+The binary will be placed at `dist/terraform-provider-superset`.
+
+To install it into `$GOPATH/bin` directly:
 
 ```shell
 go install .
 ```
 
-## Adding Dependencies
+## Development
+
+### Adding Dependencies
 
 This provider uses [Go modules](https://github.com/golang/go/wiki/Modules).
-Please see the Go documentation for the most up to date information about using Go modules.
-
-To add a new dependency `github.com/author/dependency` to your Terraform provider:
 
 ```shell
 go get github.com/author/dependency
 go mod tidy
 ```
 
-Then commit the changes to `go.mod` and `go.sum`.
+Commit the resulting changes to `go.mod` and `go.sum`.
 
-## Using the provider
+### Generating Documentation
 
-Fill this in for each provider
+```shell
+go generate
+```
 
-## Developing the Provider
+This formats the example Terraform files and regenerates the `docs/` directory using [tfplugindocs](https://github.com/hashicorp/terraform-plugin-docs).
 
-If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine
-(see [Requirements](#requirements) above).
+### Running Acceptance Tests
 
-To compile the provider, run `go install`.
-This will build the provider and put the provider binary in the `$GOPATH/bin` directory.
-
-To generate or update documentation, run `go generate`.
-
-In order to run the full suite of Acceptance tests, run `make testacc`.
-
-*Note:* Acceptance tests create real resources, and often cost money to run.
+> **Note:** Acceptance tests create real resources against a running Superset instance.
 
 ```shell
 make testacc
 ```
+
+## License
+
+[Mozilla Public License 2.0](LICENSE)

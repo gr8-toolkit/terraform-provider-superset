@@ -38,7 +38,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "hashicorp/svdimchenko/superset",
+		Address: "hashicorp/gr8-toolkit/superset",
 		Debug:   debug,
 	}
 

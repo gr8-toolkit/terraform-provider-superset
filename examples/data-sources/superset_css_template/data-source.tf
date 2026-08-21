@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     superset = {
-      source = "svdimchenko/superset"
+      source = "gr8-toolkit/superset"
     }
   }
 }

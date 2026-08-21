@@ -24,8 +24,12 @@ repos:
         args:
           - --fix
         exclude: ^docs/
+        files: \.(md)$
   - repo: https://github.com/golangci/golangci-lint
     rev: v2.9.0
     hooks:
       - id: golangci-lint-full
       - id: golangci-lint-config-verify
+
+default_language_version:
+  golang: "1.25.0"
