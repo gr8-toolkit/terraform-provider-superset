@@ -1,6 +1,7 @@
 # Terraform Provider for Apache Superset
 
-A Terraform provider for managing [Apache Superset](https://superset.apache.org/) resources — databases, datasets, dashboards, charts, roles, users, and more.
+A Terraform provider for managing [Apache Superset](https://superset.apache.org/)
+resources — databases, datasets, dashboards, charts, roles, users, and more.
 
 ## Requirements
 

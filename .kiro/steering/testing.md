@@ -2,8 +2,8 @@
 
 ## Overview
 
-All tests in `internal/provider/` are acceptance tests run with `TF_ACC=1`. They use `httpmock` to 
-intercept HTTP calls — no real Superset instance is needed. Client unit tests in `internal/client/` 
+All tests in `internal/provider/` are acceptance tests run with `TF_ACC=1`. They use `httpmock` to
+intercept HTTP calls — no real Superset instance is needed. Client unit tests in `internal/client/`
 also use `httpmock` directly.
 
 ## Running Tests
@@ -46,7 +46,8 @@ func testAccPreCheck(t *testing.T) {
 }
 ```
 
-The provider connects to `http://superset-host` with fake credentials. Every test must mock all HTTP calls that the provider will make against that host.
+The provider connects to `http://superset-host` with fake credentials.
+Every test must mock all HTTP calls that the provider will make against that host.
 
 ## Acceptance Test Pattern
 
@@ -130,6 +131,7 @@ resource "superset_foo" "test" {
 ## httpmock Patterns
 
 ### Exact URL match
+
 ```go
 httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles?q=(page_size:5000)",
     httpmock.NewJsonResponderOrPanic(200, responseBody),
@@ -137,6 +139,7 @@ httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles?q=
 ```
 
 ### Regex URL match (for dynamic IDs)
+
 ```go
 httpmock.RegisterResponder("GET", `=~^http://superset-host/api/v1/role/\d+$`,
     httpmock.NewJsonResponderOrPanic(200, responseBody),
@@ -144,6 +147,7 @@ httpmock.RegisterResponder("GET", `=~^http://superset-host/api/v1/role/\d+$`,
 ```
 
 ### Ordered responders (for resources that call the same endpoint multiple times)
+
 ```go
 // First call returns 42, second call returns 42 with updated data
 httpmock.RegisterResponderWithQuery("GET", "http://superset-host/api/v1/foo/42", nil,
@@ -152,6 +156,7 @@ httpmock.RegisterResponderWithQuery("GET", "http://superset-host/api/v1/foo/42",
 ```
 
 Or use `httpmock.ResponderFromMultipleResponses` for sequences:
+
 ```go
 httpmock.RegisterResponder("GET", `=~^http://superset-host/api/v1/foo/\d+$`,
     httpmock.NewJsonResponderOrPanic(200, responseBody), // reused for every call
@@ -159,6 +164,7 @@ httpmock.RegisterResponder("GET", `=~^http://superset-host/api/v1/foo/\d+$`,
 ```
 
 ### 404 response (resource deleted outside Terraform)
+
 ```go
 httpmock.RegisterResponder("GET", "http://superset-host/api/v1/foo/42",
     httpmock.NewStringResponder(404, `{"message": "Not Found"}`),
@@ -211,7 +217,8 @@ func TestCreateFoo(t *testing.T) {
 
 ## Global Database Cache in Tests
 
-The `GetAllDatabases` client method uses a global in-process cache with a 5-minute TTL. Tests that exercise database-related code must clear this cache:
+The `GetAllDatabases` client method uses a global in-process cache with a 5-minute TTL.
+Tests that exercise database-related code must clear this cache:
 
 ```go
 func TestAccDatabaseResource(t *testing.T) {

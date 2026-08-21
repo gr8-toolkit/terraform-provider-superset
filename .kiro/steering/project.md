@@ -2,11 +2,12 @@
 
 ## What This Is
 
-A Terraform provider for [Apache Superset](https://superset.apache.org/). It lets users manage 
-Superset resources — databases, datasets, dashboards, charts, roles, users, RLS filters, and CSS 
+A Terraform provider for [Apache Superset](https://superset.apache.org/). It lets users manage
+Superset resources — databases, datasets, dashboards, charts, roles, users, RLS filters, and CSS
 templates — through Terraform HCL.
 
-Built with the [Terraform Plugin Framework](https://github.com/hashicorp/terraform-plugin-framework) (not the older SDK).
+Built with the [Terraform Plugin Framework](https://github.com/hashicorp/terraform-plugin-framework)
+(not the older SDK).
 
 ## Go Module
 
@@ -112,6 +113,10 @@ terraform-provider-superset/
 
 ## Known Rough Edges
 
-- Several `fmt.Printf("DEBUG ...")` calls exist in `internal/client/superset.go` (in `GetAllDatabases`, `GetMetaDatabase`, `CreateDataset`, `UpdateDataset`). These should be replaced with `tflog.Debug` when touched.
-- `errcheck` is disabled in golangci-lint. Many error returns from `io.ReadAll` and `resp.Body.Close()` are intentionally ignored.
-- The global database cache in `superset.go` is process-scoped with a 5-minute TTL (`globalDatabasesCache`). Call `ClearGlobalDatabaseCache()` in tests that exercise database lookups.
+- Several `fmt.Printf("DEBUG ...")` calls exist in `internal/client/superset.go`
+(in `GetAllDatabases`, `GetMetaDatabase`, `CreateDataset`, `UpdateDataset`).
+These should be replaced with `tflog.Debug` when touched.
+- `errcheck` is disabled in golangci-lint.
+Many error returns from `io.ReadAll` and `resp.Body.Close()` are intentionally ignored.
+- The global database cache in `superset.go` is process-scoped with a 5-minute TTL (`globalDatabasesCache`).
+Call `ClearGlobalDatabaseCache()` in tests that exercise database lookups.

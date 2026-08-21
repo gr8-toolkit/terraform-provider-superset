@@ -104,6 +104,7 @@ func (r *fooResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 ```
 
 Rules:
+
 - Every attribute must have a `Description`.
 - Computed IDs always get `UseStateForUnknown()` — prevents unnecessary diffs after create.
 - Passwords, URIs, encrypted extras, and secrets always get `Sensitive: true`.
@@ -177,7 +178,9 @@ func (r *fooResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 
     foo, err := r.client.GetFoo(state.ID.ValueInt64())
     if err != nil {
-        resp.Diagnostics.AddError("Error reading foo", fmt.Sprintf("Could not read foo ID %d: %s", state.ID.ValueInt64(), err.Error()))
+        resp.Diagnostics.AddError(
+            "Error reading foo", fmt.Sprintf("Could not read foo ID %d: %s", state.ID.ValueInt64(), err.Error())
+        )
         return
     }
 
@@ -221,7 +224,9 @@ func (r *fooResource) Delete(ctx context.Context, req resource.DeleteRequest, re
 
 ```go
 func (r *fooResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-    tflog.Debug(ctx, "Starting ImportState method", map[string]interface{}{"import_id": req.ID})
+    tflog.Debug(ctx, "Starting ImportState method", map[string]interface{}{
+        "import_id": req.ID,
+    })
 
     id, err := strconv.ParseInt(req.ID, 10, 64)
     if err != nil {
@@ -272,7 +277,8 @@ Configure method is identical to resources. Read follows the same get-state → 
 
 The client authenticates on construction (`NewClient` → `authenticate()`). The JWT token is stored as `c.Token`.
 
-All mutating calls (POST/PUT/DELETE on most endpoints) require a CSRF token. Fetch it first, then include it as a header and cookie:
+All mutating calls (POST/PUT/DELETE on most endpoints) require a CSRF token.
+Fetch it first, then include it as a header and cookie:
 
 ```go
 func (c *Client) CreateFoo(name string) (int64, error) {
@@ -336,7 +342,7 @@ func (c *Client) GetFoo(id int64) (*Foo, error) {
 
 Error strings from client methods follow this format:
 
-```
+```text
 "failed to <verb> <entity>, status code: %d, response: %s"
 "failed to <verb> <entity>, status code: 404"
 ```
@@ -352,7 +358,8 @@ if err.Error() == "failed to delete foo, status code: 404" {
 
 ### JSON Type Assertions
 
-Superset API responses are decoded into `map[string]interface{}`. JSON numbers always unmarshal as `float64` in Go — convert explicitly:
+Superset API responses are decoded into `map[string]interface{}`.
+JSON numbers always unmarshal as `float64` in Go — convert explicitly:
 
 ```go
 id := int64(result["id"].(float64))
@@ -377,7 +384,8 @@ tflog.Debug(ctx, fmt.Sprintf("Created foo: ID=%d", id))
 tflog.Warn(ctx, "Foo not found, removing from state", map[string]interface{}{"id": state.ID.ValueInt64()})
 ```
 
-Existing `fmt.Printf("DEBUG ...")` calls in `superset.go` are a known issue — replace them with `tflog.Debug` when editing those methods.
+Existing `fmt.Printf("DEBUG ...")` calls in `superset.go` are a known issue —
+replace them with `tflog.Debug` when editing those methods.
 
 ## Handling Optional Fields in State
 
