@@ -1,0 +1,86 @@
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: MPL-2.0
+#
+# Acceptance-test stack for the Superset Terraform provider.
+#
+# Usage:
+#   SUPERSET_VERSION=6.0.0 docker compose -f docker-compose/docker-compose.yml up -d
+#   SUPERSET_VERSION=6.1.0 docker compose -f docker-compose/docker-compose.yml up -d
+#
+# The -dev image tag includes psycopg2 (.[postgres]) so Superset can use the
+# PostgreSQL metadata database started here. The image's default CMD is:
+#   /app/docker/entrypoints/run-server.sh
+
+services:
+  # ── Metadata database ──────────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset
+      POSTGRES_DB: superset
+    ports:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Cache ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── One-shot DB bootstrap ──────────────────────────────────────────────────
+  superset-init:
+    image: apache/superset:${SUPERSET_VERSION:-6.1.0}-dev
+    environment:
+      SUPERSET_SECRET_KEY: "test-secret-key-do-not-use-in-prod"
+      DATABASE_URL: "postgresql+psycopg2://superset:superset@db:5432/superset"
+      REDIS_URL: "redis://redis:6379/0"
+      SUPERSET_CONFIG_PATH: /app/superset_config.py
+    volumes:
+      - ./superset_config.py:/app/superset_config.py:ro
+      - ./superset-init.sh:/app/superset-init.sh:ro
+    command: ["/bin/bash", "/app/superset-init.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  # ── Web application ────────────────────────────────────────────────────────
+  superset:
+    image: apache/superset:${SUPERSET_VERSION:-6.1.0}-dev
+    environment:
+      SUPERSET_SECRET_KEY: "test-secret-key-do-not-use-in-prod"
+      DATABASE_URL: "postgresql+psycopg2://superset:superset@db:5432/superset"
+      REDIS_URL: "redis://redis:6379/0"
+      SUPERSET_CONFIG_PATH: /app/superset_config.py
+      GUNICORN_TIMEOUT: "300"
+      GUNICORN_WORKERS: "2"
+    volumes:
+      - ./superset_config.py:/app/superset_config.py:ro
+    # No command override — the image's default CMD runs the server:
+    #   /app/docker/entrypoints/run-server.sh
+    ports:
+      - "${SUPERSET_PORT:-8088}:8088"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      superset-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8088/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s

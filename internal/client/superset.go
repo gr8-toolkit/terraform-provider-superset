@@ -1641,7 +1641,9 @@ func (c *Client) CreateMetaDatabase(metaDB *MetaDatabase) (int64, error) {
 
 // GetMetaDatabase retrieves a meta database by its ID from the Superset API.
 func (c *Client) GetMetaDatabase(id int64) (*MetaDatabase, error) {
-	endpoint := fmt.Sprintf("/api/v1/database/%d", id)
+	// Use the /connection endpoint — it returns the full `extra` field, which the
+	// plain GET /api/v1/database/{id} endpoint omits.
+	endpoint := fmt.Sprintf("/api/v1/database/%d/connection", id)
 	resp, err := c.DoRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -1656,75 +1658,28 @@ func (c *Client) GetMetaDatabase(id int64) (*MetaDatabase, error) {
 	var result struct {
 		Result MetaDatabase `json:"result"`
 	}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
 
 	metaDB := &result.Result
 
-	// For debugging, also try to get full database info from list endpoint
-	fmt.Printf("DEBUG GetMetaDatabase: Trying to get extra field from list endpoint for ID %d\n", id)
-	allDBs, listErr := c.GetAllDatabases()
-	if listErr == nil {
-		fmt.Printf("DEBUG GetMetaDatabase: Successfully got %d databases from list endpoint\n", len(allDBs))
-		found := false
-		for _, db := range allDBs {
-			if dbIDFloat, ok := db["id"].(float64); ok && int64(dbIDFloat) == id {
-				found = true
-				fmt.Printf("DEBUG GetMetaDatabase: Found matching database in list: %+v\n", db)
-				if extraStr, ok := db["extra"].(string); ok {
-					if extraStr != "" {
-						fmt.Printf("DEBUG GetMetaDatabase: Found extra field from list endpoint: %q\n", extraStr)
-						metaDB.Extra = extraStr
-					} else {
-						fmt.Printf("DEBUG GetMetaDatabase: Extra field is empty even in list endpoint\n")
-					}
-				} else {
-					fmt.Printf("DEBUG GetMetaDatabase: No extra field found in list endpoint response\n")
-				}
-				break
-			}
-		}
-		if !found {
-			fmt.Printf("DEBUG GetMetaDatabase: Database ID %d not found in list of %d databases\n", id, len(allDBs))
-		}
-	} else {
-		fmt.Printf("DEBUG GetMetaDatabase: Failed to get from list endpoint: %v\n", listErr)
-	}
-
-	// Parse allowed_dbs from extra field
-	fmt.Printf("DEBUG GetMetaDatabase: Raw extra field = %q\n", metaDB.Extra)
+	// Parse allowed_dbs out of the extra JSON blob.
 	if metaDB.Extra != "" {
 		var extraData map[string]interface{}
 		if err := json.Unmarshal([]byte(metaDB.Extra), &extraData); err == nil {
-			fmt.Printf("DEBUG GetMetaDatabase: Parsed extraData = %+v\n", extraData)
 			if engineParams, ok := extraData["engine_params"].(map[string]interface{}); ok {
-				fmt.Printf("DEBUG GetMetaDatabase: Found engine_params = %+v\n", engineParams)
 				if allowedDBs, ok := engineParams["allowed_dbs"].([]interface{}); ok {
-					fmt.Printf("DEBUG GetMetaDatabase: Found allowed_dbs = %+v (length: %d)\n", allowedDBs, len(allowedDBs))
-					metaDB.AllowedDBs = make([]string, len(allowedDBs))
-					for i, db := range allowedDBs {
+					metaDB.AllowedDBs = make([]string, 0, len(allowedDBs))
+					for _, db := range allowedDBs {
 						if dbStr, ok := db.(string); ok {
-							metaDB.AllowedDBs[i] = dbStr
-							fmt.Printf("DEBUG GetMetaDatabase: Added allowed_db[%d] = %q\n", i, dbStr)
-						} else {
-							fmt.Printf("DEBUG GetMetaDatabase: Failed to convert allowed_db[%d] to string: %+v (type: %T)\n", i, db, db)
+							metaDB.AllowedDBs = append(metaDB.AllowedDBs, dbStr)
 						}
 					}
-				} else {
-					fmt.Printf("DEBUG GetMetaDatabase: No 'allowed_dbs' found in engine_params\n")
 				}
-			} else {
-				fmt.Printf("DEBUG GetMetaDatabase: No 'engine_params' found in extraData\n")
 			}
-		} else {
-			fmt.Printf("DEBUG GetMetaDatabase: Failed to unmarshal extra field as JSON: %v\n", err)
 		}
-	} else {
-		fmt.Printf("DEBUG GetMetaDatabase: Extra field is empty\n")
 	}
-	fmt.Printf("DEBUG GetMetaDatabase: Final AllowedDBs = %+v (length: %d)\n", metaDB.AllowedDBs, len(metaDB.AllowedDBs))
 
 	return metaDB, nil
 }

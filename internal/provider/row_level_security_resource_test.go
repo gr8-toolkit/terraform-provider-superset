@@ -1,75 +1,74 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package provider
 
 import (
 	"testing"
 
+	"terraform-provider-superset/internal/client"
+
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/jarcoal/httpmock"
 )
 
+// TestAccRowLevelSecurityResource covers the full CRUD + ImportState lifecycle.
+// An RLS rule references a dataset and a role by ID, so both are created here.
 func TestAccRowLevelSecurityResource(t *testing.T) {
-	httpmock.Activate()
-	defer httpmock.DeactivateAndReset()
-
-	// Mock login
-	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
-		httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
-
-	// Mock CSRF token
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
-		httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
-
-	// Mock create RLS
-	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/rowlevelsecurity/",
-		httpmock.NewStringResponder(201, `{"id": 1}`))
-
-	// Mock read RLS
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/rowlevelsecurity/1",
-		httpmock.NewStringResponder(200, `{
-			"result": {
-				"id": 1,
-				"name": "test_rls_rule",
-				"tables": [{"id": 1}],
-				"clause": "user_id = '{{ current_user_id() }}'",
-				"roles": [{"id": 1}],
-				"group_key": "test",
-				"filter_type": "Regular",
-				"description": "Test RLS rule"
-			}
-		}`))
-
-	// Mock update RLS
-	httpmock.RegisterResponder("PUT", "http://superset-host/api/v1/rowlevelsecurity/1",
-		httpmock.NewStringResponder(200, `{}`))
-
-	// Mock delete RLS
-	httpmock.RegisterResponder("DELETE", "http://superset-host/api/v1/rowlevelsecurity/1",
-		httpmock.NewStringResponder(200, `{}`))
+	client.ClearGlobalDatabaseCache()
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
+			// Create and Read
 			{
-				Config: providerConfig + `
+				Config: providerConfig() + `
+data "superset_role" "gamma" {
+  name = "Gamma"
+}
+
+resource "superset_database" "rls_db" {
+  connection_name  = "tf-acc-rls-db"
+  db_engine        = "postgresql"
+  db_user          = "superset"
+  db_pass          = "superset"
+  db_host          = "db"
+  db_port          = 5432
+  db_name          = "superset"
+  allow_ctas       = false
+  allow_cvas       = false
+  allow_dml        = false
+  allow_run_async  = false
+  expose_in_sqllab = false
+}
+
+resource "superset_dataset" "rls_seed" {
+  table_name    = "ab_user"
+  database_name = superset_database.rls_db.connection_name
+  schema        = "public"
+  depends_on    = [superset_database.rls_db]
+}
+
 resource "superset_row_level_security" "test" {
-  name        = "test_rls_rule"
-  tables      = [1]
-  clause      = "user_id = '{{ current_user_id() }}'"
-  role_ids    = [1]
-  group_key   = "test"
+  name        = "tf-acc-rls"
+  tables      = [superset_dataset.rls_seed.id]
+  clause      = "1=1"
+  role_ids    = [data.superset_role.gamma.id]
+  group_key   = "tf-acc"
   filter_type = "Regular"
-  description = "Test RLS rule"
+  description = "Acceptance test RLS rule"
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("superset_row_level_security.test", "name", "test_rls_rule"),
-					resource.TestCheckResourceAttr("superset_row_level_security.test", "clause", "user_id = '{{ current_user_id() }}'"),
-					resource.TestCheckResourceAttr("superset_row_level_security.test", "group_key", "test"),
+					resource.TestCheckResourceAttr("superset_row_level_security.test", "name", "tf-acc-rls"),
+					resource.TestCheckResourceAttr("superset_row_level_security.test", "clause", "1=1"),
+					resource.TestCheckResourceAttr("superset_row_level_security.test", "group_key", "tf-acc"),
 					resource.TestCheckResourceAttr("superset_row_level_security.test", "filter_type", "Regular"),
-					resource.TestCheckResourceAttr("superset_row_level_security.test", "description", "Test RLS rule"),
+					resource.TestCheckResourceAttr("superset_row_level_security.test", "description", "Acceptance test RLS rule"),
+					resource.TestCheckResourceAttrSet("superset_row_level_security.test", "id"),
 				),
 			},
+			// ImportState
 			{
 				ResourceName:      "superset_row_level_security.test",
 				ImportState:       true,
