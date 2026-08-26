@@ -20,7 +20,7 @@ override.tf.json
 # ── Editor / OS ───────────────────────────────────────────────────────────────
 .DS_Store
 .idea/
-.vscode
+.vscode/
 *.iml
 *~
 .*.swp
