@@ -29,7 +29,7 @@ import "terraform-provider-superset/internal/provider"
 terraform-provider-superset/
 ├── main.go                          # Entry point — provider address, version injection, debug flag
 ├── go.mod / go.sum
-├── GNUmakefile                      # build, testacc targets
+├── Makefile                         # build, testacc, compose-* targets
 ├── tools/tools.go                   # Blank import of tfplugindocs to keep it in go.sum
 ├── terraform-registry-manifest.json # Required for Terraform Registry protocol
 │

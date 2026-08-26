@@ -1,53 +1,47 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package provider
 
 import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/jarcoal/httpmock"
 )
 
+// TestAccDatabasesDataSource verifies the superset_databases data source returns
+// the databases registered in the running Superset instance.
 func TestAccDatabasesDataSource(t *testing.T) {
-	// Activate httpmock
-	httpmock.Activate()
-	defer httpmock.DeactivateAndReset()
-
-	// Mock the Superset API login response
-	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
-		httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
-
-	// Mock the Superset API response for fetching databases
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/database/",
-		httpmock.NewStringResponder(200, `{
-			"result": [
-				{"id": 34, "database_name": "Trino"},
-				{"id": 1, "database_name": "SelfPostgreSQL"},
-				{"id": 141, "database_name": "DWH_database_connection3"},
-				{"id": 140, "database_name": "DWH_database_connection2"},
-				{"id": 139, "database_name": "DWH_database_connection"},
-				{"id": 174, "database_name": "DWH_database_connection4"}
-			]
-		}`))
-
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Read testing
 			{
-				Config: providerConfig + testAccDatabasesDataSourceConfig,
+				// Seed one database so the list is non-empty even on a pristine instance.
+				Config: providerConfig() + `
+resource "superset_database" "ds_seed" {
+  connection_name  = "tf-acc-db-ds-seed"
+  db_engine        = "postgresql"
+  db_user          = "superset"
+  db_pass          = "superset"
+  db_host          = "db"
+  db_port          = 5432
+  db_name          = "superset"
+  allow_ctas       = false
+  allow_cvas       = false
+  allow_dml        = false
+  allow_run_async  = false
+  expose_in_sqllab = false
+}
+
+data "superset_databases" "test" {
+  depends_on = [superset_database.ds_seed]
+}
+`,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("data.superset_databases.test", "databases.#", "6"),
-					resource.TestCheckResourceAttr("data.superset_databases.test", "databases.0.id", "34"),
-					resource.TestCheckResourceAttr("data.superset_databases.test", "databases.0.database_name", "Trino"),
-					resource.TestCheckResourceAttr("data.superset_databases.test", "databases.1.id", "1"),
-					resource.TestCheckResourceAttr("data.superset_databases.test", "databases.1.database_name", "SelfPostgreSQL"),
+					resource.TestCheckResourceAttrSet("data.superset_databases.test", "databases.#"),
 				),
 			},
 		},
 	})
 }
-
-const testAccDatabasesDataSourceConfig = `
-data "superset_databases" "test" {}
-`

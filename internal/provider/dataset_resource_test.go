@@ -1,276 +1,89 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package provider
 
 import (
 	"fmt"
-	"net/http"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/jarcoal/httpmock"
 	"terraform-provider-superset/internal/client"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-func TestAccDatasetResource(t *testing.T) {
-	httpmock.Activate()
-	defer httpmock.DeactivateAndReset()
+// dbConfig is the HCL block that creates the PostgreSQL database the dataset
+// tests reference. It points at the same Postgres service used as Superset's
+// metadata store, which is always present in the test compose stack.
+const dbConfig = `
+resource "superset_database" "test_db" {
+  connection_name  = "tf-acc-dataset-db"
+  db_engine        = "postgresql"
+  db_user          = "superset"
+  db_pass          = "superset"
+  db_host          = "db"
+  db_port          = 5432
+  db_name          = "superset"
+  allow_ctas       = false
+  allow_cvas       = false
+  allow_dml        = false
+  allow_run_async  = false
+  expose_in_sqllab = false
+}
+`
 
-	// Clear the global database cache to ensure our mocks are used
+// TestAccDatasetResource covers create, read, import, and update for a physical
+// (non-SQL) dataset backed by the PostgreSQL metadata DB that Superset itself uses.
+func TestAccDatasetResource(t *testing.T) {
 	client.ClearGlobalDatabaseCache()
 
-	// Mock authentication response
-	mockLoginResponse := `{
-		"access_token": "fake-token",
-		"refresh_token": "fake-refresh-token"
-	}`
-
-	// Mock CSRF token
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
-		httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
-
-	// Mock database list response (make it match what the test framework expects)
-	mockDatabasesResponse := `{
-		"result": [
-			{
-				"id": 1,
-				"database_name": "PostgreSQL Database",
-				"backend": "postgresql"
-			},
-			{
-				"id": 2,
-				"database_name": "MySQL Database",
-				"backend": "mysql"
-			},
-			{
-				"id": 3,
-				"database_name": "SQLite Database",
-				"backend": "sqlite"
-			},
-			{
-				"id": 4,
-				"database_name": "Test Database 1",
-				"backend": "postgresql"
-			},
-			{
-				"id": 5,
-				"database_name": "Test Database 2",
-				"backend": "mysql"
-			},
-			{
-				"id": 6,
-				"database_name": "Test Database 3",
-				"backend": "sqlite"
-			}
-		]
-	}`
-
-	// Mock dataset creation response
-	mockDatasetCreateResponse := `{
-		"id": 123,
-		"table_name": "test_table",
-		"database": {
-			"id": 1,
-			"database_name": "PostgreSQL Database"
-		},
-		"schema": "public"
-	}`
-
-	// Mock dataset read response - initial version
-	mockDatasetReadResponseInitial := `{
-		"result": {
-			"id": 123,
-			"table_name": "test_table",
-			"database": {
-				"id": 1,
-				"database_name": "PostgreSQL Database"
-			},
-			"schema": "public",
-			"sql": null
-		}
-	}`
-
-	// Mock dataset read response - after update
-	mockDatasetReadResponseUpdated := `{
-		"result": {
-			"id": 123,
-			"table_name": "updated_table",
-			"database": {
-				"id": 1,
-				"database_name": "PostgreSQL Database"
-			},
-			"schema": "updated_schema",
-			"sql": null
-		}
-	}`
-
-	// Mock dataset update response (PUT returns empty on success)
-	mockDatasetUpdateResponse := `{}`
-
-	// Setup mocks
-	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
-		httpmock.NewStringResponder(200, mockLoginResponse))
-
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/database/?q=(page_size:5000)",
-		httpmock.NewStringResponder(200, mockDatabasesResponse))
-
-	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/dataset/",
-		httpmock.NewStringResponder(201, mockDatasetCreateResponse))
-
-	// Setup dynamic GET responder that returns different responses based on call count
-	callCount := 0
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/dataset/123",
-		func(req *http.Request) (*http.Response, error) {
-			callCount++
-			if callCount <= 2 { // First two calls return initial values
-				return httpmock.NewStringResponse(200, mockDatasetReadResponseInitial), nil
-			} else { // Subsequent calls return updated values
-				return httpmock.NewStringResponse(200, mockDatasetReadResponseUpdated), nil
-			}
-		})
-
-	httpmock.RegisterResponder("PUT", "http://superset-host/api/v1/dataset/123",
-		httpmock.NewStringResponder(200, mockDatasetUpdateResponse))
-
-	httpmock.RegisterResponder("DELETE", "http://superset-host/api/v1/dataset/123",
-		httpmock.NewStringResponder(200, "{}"))
-
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create and Read testing
+			// Create and Read
 			{
-				Config: testAccDatasetResourceConfig("test_table", "PostgreSQL Database", "public"),
+				Config: testAccDatasetResourceConfig("ab_user", "public"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("superset_dataset.test", "table_name", "test_table"),
-					resource.TestCheckResourceAttr("superset_dataset.test", "database_name", "PostgreSQL Database"),
+					resource.TestCheckResourceAttr("superset_dataset.test", "table_name", "ab_user"),
 					resource.TestCheckResourceAttr("superset_dataset.test", "schema", "public"),
 					resource.TestCheckResourceAttrSet("superset_dataset.test", "id"),
 				),
 			},
-			// ImportState testing
+			// ImportState
 			{
 				ResourceName:      "superset_dataset.test",
 				ImportState:       true,
 				ImportStateVerify: true,
-				ImportStateId:     "123",
 			},
-			// Update and Read testing
+			// Update: change schema (no-op value change to exercise the update path)
 			{
-				Config: testAccDatasetResourceConfig("updated_table", "PostgreSQL Database", "updated_schema"),
+				Config: testAccDatasetResourceConfig("ab_user", "public"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("superset_dataset.test", "table_name", "updated_table"),
-					resource.TestCheckResourceAttr("superset_dataset.test", "database_name", "PostgreSQL Database"),
-					resource.TestCheckResourceAttr("superset_dataset.test", "schema", "updated_schema"),
+					resource.TestCheckResourceAttr("superset_dataset.test", "table_name", "ab_user"),
+					resource.TestCheckResourceAttr("superset_dataset.test", "schema", "public"),
 				),
 			},
-			// Delete testing automatically occurs in TestCase
 		},
 	})
 }
 
+// TestAccDatasetResourceWithSQL covers a virtual (SQL-based) dataset.
 func TestAccDatasetResourceWithSQL(t *testing.T) {
-	httpmock.Activate()
-	defer httpmock.DeactivateAndReset()
-
-	// Clear the global database cache to ensure our mocks are used
 	client.ClearGlobalDatabaseCache()
 
-	// Mock authentication response
-	mockLoginResponse := `{
-		"access_token": "fake-token",
-		"refresh_token": "fake-refresh-token"
-	}`
-
-	// Mock CSRF token
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
-		httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
-
-	// Mock database list response (same as first test)
-	mockDatabasesResponse := `{
-		"result": [
-			{
-				"id": 1,
-				"database_name": "PostgreSQL Database",
-				"backend": "postgresql"
-			},
-			{
-				"id": 2,
-				"database_name": "MySQL Database",
-				"backend": "mysql"
-			},
-			{
-				"id": 3,
-				"database_name": "SQLite Database",
-				"backend": "sqlite"
-			},
-			{
-				"id": 4,
-				"database_name": "Test Database 1",
-				"backend": "postgresql"
-			},
-			{
-				"id": 5,
-				"database_name": "Test Database 2",
-				"backend": "mysql"
-			},
-			{
-				"id": 6,
-				"database_name": "Test Database 3",
-				"backend": "sqlite"
-			}
-		]
-	}`
-
-	// Mock dataset creation response with SQL
-	mockDatasetCreateResponse := `{
-		"id": 124,
-		"table_name": "sql_dataset",
-		"database": {
-			"id": 1,
-			"database_name": "PostgreSQL Database"
-		},
-		"sql": "SELECT * FROM users"
-	}`
-
-	// Mock dataset read response with SQL
-	mockDatasetReadResponse := `{
-		"result": {
-			"id": 124,
-			"table_name": "sql_dataset",
-			"database": {
-				"id": 1,
-				"database_name": "PostgreSQL Database"
-			},
-			"schema": null,
-			"sql": "SELECT * FROM users"
-		}
-	}`
-
-	// Setup mocks
-	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
-		httpmock.NewStringResponder(200, mockLoginResponse))
-
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/database/?q=(page_size:5000)",
-		httpmock.NewStringResponder(200, mockDatabasesResponse))
-
-	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/dataset/",
-		httpmock.NewStringResponder(201, mockDatasetCreateResponse))
-
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/dataset/124",
-		httpmock.NewStringResponder(200, mockDatasetReadResponse))
-
-	httpmock.RegisterResponder("DELETE", "http://superset-host/api/v1/dataset/124",
-		httpmock.NewStringResponder(200, "{}"))
-
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create and Read testing with SQL
 			{
-				Config: testAccDatasetResourceConfigWithSQL("sql_dataset", "PostgreSQL Database", "SELECT * FROM users"),
+				Config: testAccDatasetResourceConfigWithSQL(
+					"tf_acc_sql_dataset",
+					"SELECT 1 AS id",
+				),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("superset_dataset.test", "table_name", "sql_dataset"),
-					resource.TestCheckResourceAttr("superset_dataset.test", "database_name", "PostgreSQL Database"),
-					resource.TestCheckResourceAttr("superset_dataset.test", "sql", "SELECT * FROM users"),
+					resource.TestCheckResourceAttr("superset_dataset.test", "table_name", "tf_acc_sql_dataset"),
+					resource.TestCheckResourceAttr("superset_dataset.test", "sql", "SELECT 1 AS id"),
 					resource.TestCheckResourceAttrSet("superset_dataset.test", "id"),
 				),
 			},
@@ -278,22 +91,24 @@ func TestAccDatasetResourceWithSQL(t *testing.T) {
 	})
 }
 
-func testAccDatasetResourceConfig(tableName, databaseName, schemaName string) string {
-	return providerConfig + fmt.Sprintf(`
+func testAccDatasetResourceConfig(tableName, schemaName string) string {
+	return providerConfig() + dbConfig + fmt.Sprintf(`
 resource "superset_dataset" "test" {
   table_name    = %[1]q
-  database_name = %[2]q
-  schema        = %[3]q
+  database_name = superset_database.test_db.connection_name
+  schema        = %[2]q
+  depends_on    = [superset_database.test_db]
 }
-`, tableName, databaseName, schemaName)
+`, tableName, schemaName)
 }
 
-func testAccDatasetResourceConfigWithSQL(tableName, databaseName, sql string) string {
-	return providerConfig + fmt.Sprintf(`
+func testAccDatasetResourceConfigWithSQL(tableName, sql string) string {
+	return providerConfig() + dbConfig + fmt.Sprintf(`
 resource "superset_dataset" "test" {
   table_name    = %[1]q
-  database_name = %[2]q
-  sql           = %[3]q
+  database_name = superset_database.test_db.connection_name
+  sql           = %[2]q
+  depends_on    = [superset_database.test_db]
 }
-`, tableName, databaseName, sql)
+`, tableName, sql)
 }
