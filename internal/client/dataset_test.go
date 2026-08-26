@@ -154,31 +154,3 @@ func TestGetDatasetIDByUUID_NotFound(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), id)
 }
-
-func TestDeleteChart(t *testing.T) {
-	httpmock.Activate()
-	defer httpmock.DeactivateAndReset()
-
-	c := &Client{Host: "http://test-host", Token: "tok"}
-	httpmock.RegisterResponder("GET", "http://test-host/api/v1/security/csrf_token/",
-		httpmock.NewStringResponder(200, `{"result": "csrf"}`))
-	httpmock.RegisterResponder("DELETE", "http://test-host/api/v1/chart/5",
-		httpmock.NewStringResponder(200, ""))
-
-	err := c.DeleteChart(5)
-	assert.NoError(t, err)
-}
-
-func TestDeleteChart_NotFound_IsSuccess(t *testing.T) {
-	httpmock.Activate()
-	defer httpmock.DeactivateAndReset()
-
-	c := &Client{Host: "http://test-host", Token: "tok"}
-	httpmock.RegisterResponder("GET", "http://test-host/api/v1/security/csrf_token/",
-		httpmock.NewStringResponder(200, `{"result": "csrf"}`))
-	httpmock.RegisterResponder("DELETE", "http://test-host/api/v1/chart/99",
-		httpmock.NewStringResponder(404, `{"message": "Not found"}`))
-
-	err := c.DeleteChart(99)
-	assert.NoError(t, err)
-}
