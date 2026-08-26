@@ -232,5 +232,9 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewDatasetImportResource,      // Dataset import resource
 		NewChartImportResource,        // Chart import resource
 		NewCSSTemplateResource,        // CSS template resource
+		NewChartResource,              // Chart resource
+		NewDashboardResource,          // Dashboard resource
+		NewSavedQueryResource,         // Saved query resource
+		NewAnnotationLayerResource,    // Annotation layer resource
 	}
 }
