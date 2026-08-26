@@ -9,8 +9,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-// TestAccRolesDataSource verifies the superset_roles data source returns at least
-// the built-in "Admin" role that every fresh Superset installation ships with.
+// TestAccRolesDataSource verifies the superset_roles data source returns the
+// built-in roles that every fresh Superset installation ships with.
 func TestAccRolesDataSource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -21,8 +21,18 @@ func TestAccRolesDataSource(t *testing.T) {
 data "superset_roles" "test" {}
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// Every fresh Superset ships with at least Admin, Public, Alpha, Gamma, sql_lab.
+					// Every fresh Superset ships with Admin, Public, Alpha, Gamma, sql_lab — at least 5.
 					resource.TestCheckResourceAttrSet("data.superset_roles.test", "roles.#"),
+					// Verify the Admin role is actually present by name.
+					resource.TestCheckTypeSetElemNestedAttrs(
+						"data.superset_roles.test", "roles.*",
+						map[string]string{"name": "Admin"},
+					),
+					// Verify Gamma is present — used by other tests as a known role.
+					resource.TestCheckTypeSetElemNestedAttrs(
+						"data.superset_roles.test", "roles.*",
+						map[string]string{"name": "Gamma"},
+					),
 				),
 			},
 		},
