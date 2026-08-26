@@ -123,3 +123,72 @@ func TestUpdateChart_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "status code: 404")
 }
+
+func TestDeleteChart(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	c := &Client{Host: "http://test-host", Token: "tok"}
+	httpmock.RegisterResponder("GET", "http://test-host/api/v1/security/csrf_token/",
+		httpmock.NewStringResponder(200, `{"result": "csrf"}`))
+	httpmock.RegisterResponder("DELETE", "http://test-host/api/v1/chart/42",
+		httpmock.NewStringResponder(200, ""))
+
+	err := c.DeleteChart(42)
+	assert.NoError(t, err)
+}
+
+func TestDeleteChart_NotFound_IsSuccess(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	c := &Client{Host: "http://test-host", Token: "tok"}
+	httpmock.RegisterResponder("GET", "http://test-host/api/v1/security/csrf_token/",
+		httpmock.NewStringResponder(200, `{"result": "csrf"}`))
+	httpmock.RegisterResponder("DELETE", "http://test-host/api/v1/chart/99",
+		httpmock.NewStringResponder(404, `{"message": "Not found"}`))
+
+	err := c.DeleteChart(99)
+	assert.NoError(t, err)
+}
+
+func TestGetChartIDByUUID(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	c := &Client{Host: "http://test-host", Token: "tok"}
+	httpmock.RegisterResponder("GET",
+		`=~^http://test-host/api/v1/chart/\?q=`,
+		httpmock.NewStringResponder(200, `{"result": [{"id": 42}]}`))
+
+	id, err := c.GetChartIDByUUID("some-chart-uuid")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(42), id)
+}
+
+func TestGetChartIDByUUID_NotFound(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	c := &Client{Host: "http://test-host", Token: "tok"}
+	httpmock.RegisterResponder("GET",
+		`=~^http://test-host/api/v1/chart/\?q=`,
+		httpmock.NewStringResponder(200, `{"result": []}`))
+
+	id, err := c.GetChartIDByUUID("missing-uuid")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), id)
+}
+
+func TestGetChartDashboardCount(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	c := &Client{Host: "http://test-host", Token: "tok"}
+	httpmock.RegisterResponder("GET", "http://test-host/api/v1/chart/42",
+		httpmock.NewStringResponder(200, `{"result": {"dashboards": [{"id": 1}, {"id": 2}]}}`))
+
+	count, err := c.GetChartDashboardCount(42)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, count)
+}
