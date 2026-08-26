@@ -1,35 +1,36 @@
-*.dll
-*.exe
-.DS_Store
-example.tf
-terraform.tfplan
-terraform.tfstate
-bin/
+# ── Go ────────────────────────────────────────────────────────────────────────
+*.test
+*.out
 dist/
-modules-dev/
-/pkg/
-website/.vagrant
-website/.bundle
-website/build
-website/node_modules
-.vagrant/
-*.backup
-./*.tfstate
+
+# ── Terraform ─────────────────────────────────────────────────────────────────
 .terraform/
-*.log
-*.bak
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfplan
+*.tfstate
+*.tfstate.*
+example.tf
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ── Editor / OS ───────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode
+*.iml
 *~
 .*.swp
-.idea
-*.iml
-*.test
-*.iml
+*.bak
+*.backup
 
-website/vendor
-
-# Test exclusions
-!command/test-fixtures/**/*.tfstate
-!command/test-fixtures/**/.terraform/
-
-# Keep windows files with windows line endings
+# ── Windows ───────────────────────────────────────────────────────────────────
+*.dll
+*.exe
 *.winfile eol=crlf
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
