@@ -199,33 +199,22 @@ func (c *Client) GetRolePermissions(roleID int64) ([]Permission, error) {
 	return result.Permissions, nil
 }
 
-// GetPermissionViewMenuIDs resolves permission+view_menu name pairs to their numeric IDs.
-func (c *Client) GetPermissionViewMenuIDs(permissions []map[string]string) ([]int64, error) {
-	page := 0
+// PermissionKey builds the lookup key used by GetPermissionIDMap.
+func PermissionKey(permissionName, viewMenuName string) string {
+	return permissionName + "|" + viewMenuName
+}
+
+// GetPermissionIDMap returns the IDs of all permission+view_menu pairs, keyed by PermissionKey.
+// Pages are ordered by id: without an explicit order the database may return overlapping
+// pages and silently skip entries.
+func (c *Client) GetPermissionIDMap() (map[string]int64, error) {
 	pageSize := 100
-	var ids []int64
-	found := make(map[string]bool)
-	for _, p := range permissions {
-		found[p["permission"]+"|"+p["view_menu"]] = false
-	}
-
-	for {
-		url := fmt.Sprintf("%s/api/v1/security/permissions-resources/?q=(page:%d,page_size:%d)", c.Host, page, pageSize)
-		req, err := http.NewRequest("GET", url, nil)
+	ids := make(map[string]int64)
+	for page := 0; ; page++ {
+		endpoint := fmt.Sprintf("/api/v1/security/permissions-resources/?q=(order_column:id,order_direction:asc,page:%d,page_size:%d)", page, pageSize)
+		resp, err := c.DoRequest("GET", endpoint, nil)
 		if err != nil {
 			return nil, err
-		}
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
 		}
 
 		var result struct {
@@ -239,83 +228,59 @@ func (c *Client) GetPermissionViewMenuIDs(permissions []map[string]string) ([]in
 				} `json:"view_menu"`
 			} `json:"result"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
+		}
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if err != nil {
 			return nil, err
 		}
 
-		for _, p := range permissions {
-			key := p["permission"] + "|" + p["view_menu"]
-			if !found[key] {
-				for _, res := range result.Resources {
-					if res.Permission.Name == p["permission"] && res.ViewMenu.Name == p["view_menu"] {
-						ids = append(ids, res.ID)
-						found[key] = true
-						break
-					}
-				}
-			}
+		for _, r := range result.Resources {
+			ids[PermissionKey(r.Permission.Name, r.ViewMenu.Name)] = r.ID
 		}
+		if len(result.Resources) < pageSize {
+			return ids, nil
+		}
+	}
+}
 
-		allFound := true
-		for _, v := range found {
-			if !v {
-				allFound = false
-				break
-			}
+// GetPermissionViewMenuIDs resolves permission+view_menu name pairs to their numeric IDs.
+// Pairs that don't exist in Superset are skipped.
+func (c *Client) GetPermissionViewMenuIDs(permissions []map[string]string) ([]int64, error) {
+	idMap, err := c.GetPermissionIDMap()
+	if err != nil {
+		return nil, err
+	}
+	ids := []int64{}
+	for _, p := range permissions {
+		if id, ok := idMap[PermissionKey(p["permission"], p["view_menu"])]; ok {
+			ids = append(ids, id)
 		}
-		if allFound || len(result.Resources) < pageSize {
-			break
-		}
-		page++
 	}
 	return ids, nil
 }
 
 // GetPermissionIDByNameAndView resolves a single permission+view_menu name pair.
 func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName string) (int64, error) {
-	page := 0
-	pageSize := 100
-	for {
-		resp, err := c.DoRequest("GET", fmt.Sprintf("/api/v1/security/permissions-resources?q=(page:%d,page_size:%d)", page, pageSize), nil)
-		if err != nil {
-			return 0, err
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return 0, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
-		}
-
-		var result struct {
-			Resources []struct {
-				ID         int64 `json:"id"`
-				Permission struct {
-					Name string `json:"name"`
-				} `json:"permission"`
-				ViewMenu struct {
-					Name string `json:"name"`
-				} `json:"view_menu"`
-			} `json:"result"`
-			Count int `json:"count"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return 0, err
-		}
-		for _, r := range result.Resources {
-			if r.Permission.Name == permissionName && r.ViewMenu.Name == viewMenuName {
-				return r.ID, nil
-			}
-		}
-		if len(result.Resources) < pageSize {
-			break
-		}
-		page++
+	idMap, err := c.GetPermissionIDMap()
+	if err != nil {
+		return 0, err
+	}
+	if id, ok := idMap[PermissionKey(permissionName, viewMenuName)]; ok {
+		return id, nil
 	}
 	return 0, fmt.Errorf("permission %s with view menu %s not found", permissionName, viewMenuName)
 }
 
 // UpdateRolePermissions replaces all permissions on a role with the given IDs.
 func (c *Client) UpdateRolePermissions(roleID int64, permissionIDs []int64) error {
+	// a nil slice is marshalled as null, which the API rejects
+	if permissionIDs == nil {
+		permissionIDs = []int64{}
+	}
 	url := fmt.Sprintf("%s/api/v1/security/roles/%d/permissions", c.Host, roleID)
 	data, err := json.Marshal(map[string][]int64{"permission_view_menu_ids": permissionIDs})
 	if err != nil {

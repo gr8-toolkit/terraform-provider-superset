@@ -130,14 +130,24 @@ func (r *rolePermissionsResource) Create(ctx context.Context, req resource.Creat
 	})
 
 	// Prepare permission IDs from plan using a map to ensure unique IDs
-	var resourcePermissions []resourcePermissionModel
+	permissionIDMap, err := r.client.GetPermissionIDMap()
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error fetching permissions",
+			"Could not fetch permissions from Superset: "+err.Error(),
+		)
+		return
+	}
+
+	// non-nil so an empty list is stored as [] (matching config), not null
+	resourcePermissions := []resourcePermissionModel{}
 	permissionIDs := map[int64]bool{}
 	for _, perm := range plan.ResourcePermissions {
-		permID, err := r.client.GetPermissionIDByNameAndView(perm.Permission.ValueString(), perm.ViewMenu.ValueString())
-		if err != nil {
+		permID, ok := permissionIDMap[client.PermissionKey(perm.Permission.ValueString(), perm.ViewMenu.ValueString())]
+		if !ok {
 			resp.Diagnostics.AddError(
 				"Error finding permission ID",
-				fmt.Sprintf("Could not find permission ID for '%s' and view '%s': %s", perm.Permission.ValueString(), perm.ViewMenu.ValueString(), err),
+				fmt.Sprintf("Could not find permission ID for '%s' and view '%s'", perm.Permission.ValueString(), perm.ViewMenu.ValueString()),
 			)
 			return
 		}
@@ -154,7 +164,7 @@ func (r *rolePermissionsResource) Create(ctx context.Context, req resource.Creat
 	})
 
 	// Convert map to slice for the API call
-	var permIDList []int64
+	permIDList := []int64{}
 	for id := range permissionIDs {
 		permIDList = append(permIDList, id)
 	}
@@ -236,7 +246,8 @@ func (r *rolePermissionsResource) Read(ctx context.Context, req resource.ReadReq
 	}
 
 	// Verify each permission in state still exists and update IDs
-	var resourcePermissions []resourcePermissionModel
+	// non-nil so an empty list is stored as [] (matching config), not null
+	resourcePermissions := []resourcePermissionModel{}
 	for _, statePerm := range state.ResourcePermissions {
 		key := fmt.Sprintf("%s|%s", statePerm.Permission.ValueString(), statePerm.ViewMenu.ValueString())
 		if permID, exists := permMap[key]; exists {
@@ -288,14 +299,24 @@ func (r *rolePermissionsResource) Update(ctx context.Context, req resource.Updat
 	})
 
 	// Prepare permission IDs from plan using a map to ensure unique IDs
-	var resourcePermissions []resourcePermissionModel
+	permissionIDMap, err := r.client.GetPermissionIDMap()
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error fetching permissions",
+			"Could not fetch permissions from Superset: "+err.Error(),
+		)
+		return
+	}
+
+	// non-nil so an empty list is stored as [] (matching config), not null
+	resourcePermissions := []resourcePermissionModel{}
 	permissionIDs := map[int64]bool{}
 	for _, perm := range plan.ResourcePermissions {
-		permID, err := r.client.GetPermissionIDByNameAndView(perm.Permission.ValueString(), perm.ViewMenu.ValueString())
-		if err != nil {
+		permID, ok := permissionIDMap[client.PermissionKey(perm.Permission.ValueString(), perm.ViewMenu.ValueString())]
+		if !ok {
 			resp.Diagnostics.AddError(
 				"Error finding permission ID",
-				fmt.Sprintf("Could not find permission ID for '%s' and view '%s': %s", perm.Permission.ValueString(), perm.ViewMenu.ValueString(), err),
+				fmt.Sprintf("Could not find permission ID for '%s' and view '%s'", perm.Permission.ValueString(), perm.ViewMenu.ValueString()),
 			)
 			return
 		}
@@ -312,7 +333,7 @@ func (r *rolePermissionsResource) Update(ctx context.Context, req resource.Updat
 	})
 
 	// Convert map to slice for the API call
-	var permIDList []int64
+	permIDList := []int64{}
 	for id := range permissionIDs {
 		permIDList = append(permIDList, id)
 	}

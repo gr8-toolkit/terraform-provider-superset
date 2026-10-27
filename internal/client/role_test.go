@@ -4,6 +4,10 @@
 package client
 
 import (
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jarcoal/httpmock"
@@ -180,6 +184,86 @@ func TestGetRolePermissions(t *testing.T) {
 	assert.Equal(t, int64(10), perms[0].ID)
 	assert.Equal(t, "can_read", perms[0].PermissionName)
 	assert.Equal(t, "Chart", perms[0].ViewMenuName)
+}
+
+// permissionsPage builds a permissions-resources page with n entries starting at firstID.
+func permissionsPage(firstID, n int) string {
+	items := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		id := firstID + i
+		items = append(items, fmt.Sprintf(`{"id": %d, "permission": {"name": "can_p%d"}, "view_menu": {"name": "View%d"}}`, id, id, id))
+	}
+	return `{"result": [` + strings.Join(items, ",") + `]}`
+}
+
+func registerPermissionsPage(page int, body string) {
+	httpmock.RegisterResponderWithQuery("GET", "http://test-host/api/v1/security/permissions-resources/",
+		fmt.Sprintf("q=(order_column:id,order_direction:asc,page:%d,page_size:100)", page),
+		httpmock.NewStringResponder(200, body))
+}
+
+func TestGetPermissionIDMap_OrderedPagination(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	c := &Client{Host: "http://test-host", Token: "tok"}
+	registerPermissionsPage(0, permissionsPage(1, 100))
+	registerPermissionsPage(1, permissionsPage(101, 30))
+
+	ids, err := c.GetPermissionIDMap()
+	assert.NoError(t, err)
+	assert.Len(t, ids, 130)
+	assert.Equal(t, int64(1), ids[PermissionKey("can_p1", "View1")])
+	assert.Equal(t, int64(130), ids[PermissionKey("can_p130", "View130")])
+	assert.Equal(t, 2, httpmock.GetTotalCallCount())
+}
+
+func TestGetPermissionIDByNameAndView(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	c := &Client{Host: "http://test-host", Token: "tok"}
+	registerPermissionsPage(0, permissionsPage(1, 5))
+
+	id, err := c.GetPermissionIDByNameAndView("can_p3", "View3")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), id)
+
+	_, err = c.GetPermissionIDByNameAndView("can_time_range", "Api")
+	assert.Error(t, err)
+}
+
+func TestGetPermissionViewMenuIDs_SkipsMissing(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	c := &Client{Host: "http://test-host", Token: "tok"}
+	registerPermissionsPage(0, permissionsPage(1, 5))
+
+	ids, err := c.GetPermissionViewMenuIDs([]map[string]string{
+		{"permission": "can_p2", "view_menu": "View2"},
+		{"permission": "can_missing", "view_menu": "Nope"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{2}, ids)
+}
+
+func TestUpdateRolePermissions_NilSendsEmptyList(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	c := &Client{Host: "http://test-host", Token: "tok"}
+	var sent string
+	httpmock.RegisterResponder("POST", "http://test-host/api/v1/security/roles/1/permissions",
+		func(req *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(req.Body)
+			sent = string(body)
+			return httpmock.NewStringResponse(200, `{}`), nil
+		})
+
+	err := c.UpdateRolePermissions(1, nil)
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"permission_view_menu_ids": []}`, sent)
 }
 
 func TestClearRolePermissions(t *testing.T) {
